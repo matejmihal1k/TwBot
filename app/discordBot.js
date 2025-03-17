@@ -8,17 +8,6 @@ const path = require('path')
 const config = require('../config.json')
 const taskManager = require('./taskManager')
 
-// Command aliases/shortcuts - centralized here
-const COMMAND_ALIASES = {
-  f: 'farm',
-  b: 'balance',
-  t: 'train',
-  s: 'status',
-  r: 'resume',
-  p: 'pause',
-  h: 'help',
-}
-
 // Create Discord client with required intents
 const client = new Client({
   intents: [
@@ -77,7 +66,9 @@ function isAuthorized(userId) {
  * @returns {string} - The resolved command name
  */
 function resolveCommandAlias(commandName) {
-  return COMMAND_ALIASES[commandName] || commandName
+  // Get command aliases from config
+  const aliases = config.discord.commandAliases || {}
+  return aliases[commandName] || commandName
 }
 
 /**
@@ -204,7 +195,7 @@ function startBot() {
 // Start the bot
 startBot()
 
-// Export interface - only what's actually needed
+// Export interface - include everything needed by other modules
 module.exports = {
   isRunning: () => isRunning,
   setRunning: (value) => {
