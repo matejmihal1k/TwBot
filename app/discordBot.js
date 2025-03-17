@@ -5,10 +5,10 @@
 const { Client, GatewayIntentBits } = require('discord.js')
 const fs = require('fs')
 const path = require('path')
-const config = require('./config.json')
+const config = require('../config.json')
 const taskManager = require('./taskManager')
 
-// Command aliases/shortcuts
+// Command aliases/shortcuts - centralized here
 const COMMAND_ALIASES = {
   f: 'farm',
   b: 'balance',
@@ -32,13 +32,14 @@ const client = new Client({
 // Global state
 let isRunning = false
 const commands = new Map()
+let defaultChannel = null // Cache for default channel
 
 /**
  * Save config to file
  */
-const saveConfig = () => {
+function saveConfig() {
   try {
-    fs.writeFileSync(path.join(__dirname, 'config.json'), JSON.stringify(config, null, 2))
+    fs.writeFileSync(path.join(__dirname, '..', 'config.json'), JSON.stringify(config, null, 2))
   } catch (error) {
     console.error('Error saving config:', error)
   }
@@ -56,7 +57,7 @@ function loadCommands() {
         const command = require(path.join(commandsDir, file))
         commands.set(command.name, command)
       })
-    console.log(`Loaded ${commands.size} commands`)
+    console.log(`Loaded ${commands.size} Discord commands`)
   } catch (error) {
     console.error('Error loading commands:', error)
     process.exit(1)
@@ -71,21 +72,34 @@ function isAuthorized(userId) {
 }
 
 /**
+ * Resolve command name using aliases
+ * @param {string} commandName - The command name to resolve
+ * @returns {string} - The resolved command name
+ */
+function resolveCommandAlias(commandName) {
+  return COMMAND_ALIASES[commandName] || commandName
+}
+
+/**
  * Handle incoming message
  */
 function handleMessage(message) {
-  // Ignore irrelevant messages
-  if (message.author.bot || !isAuthorized(message.author.id)) return
+  // Ignore messages from bot
+  if (message.author.bot) return
 
+  // For non-DM messages, check for command prefix
   const isDM = message.channel.type === 'DM'
   if (!isDM && !message.content.startsWith(config.discord.commandPrefix)) return
+
+  // Check authorization
+  if (!isAuthorized(message.author.id)) return
 
   // Parse command
   const content = isDM ? message.content : message.content.slice(config.discord.commandPrefix.length)
   const [commandName, ...args] = content.trim().split(/ +/)
 
   // Resolve command alias
-  const resolvedCommandName = COMMAND_ALIASES[commandName.toLowerCase()] || commandName.toLowerCase()
+  const resolvedCommandName = resolveCommandAlias(commandName.toLowerCase())
 
   // Handle paused state - only allow resume and status when paused
   if (!isRunning && !['resume', 'status'].includes(resolvedCommandName)) {
@@ -132,6 +146,27 @@ function handleMessage(message) {
 }
 
 /**
+ * Get default notification channel (with caching)
+ */
+function getDefaultChannel() {
+  // Return cached channel if available and valid
+  if (defaultChannel && client.channels.cache.has(defaultChannel.id)) {
+    return defaultChannel
+  }
+
+  if (!client || !client.channels || client.channels.cache.size === 0) {
+    return null
+  }
+
+  // Try to find an appropriate channel
+  defaultChannel =
+    client.channels.cache.find((c) => c.type === 0 && (c.name.includes('bot') || c.name.includes('command'))) ||
+    client.channels.cache.find((c) => c.type === 0)
+
+  return defaultChannel
+}
+
+/**
  * Initialize and start the bot
  */
 function startBot() {
@@ -169,13 +204,14 @@ function startBot() {
 // Start the bot
 startBot()
 
-// Export interface
+// Export interface - only what's actually needed
 module.exports = {
   isRunning: () => isRunning,
-  farm: () => config.features.farm.enabled,
-  balance: () => config.features.balance.enabled,
-  train: () => config.features.train.enabled,
   setRunning: (value) => {
     isRunning = value
   },
+  getClient: () => client,
+  getDefaultChannel,
+  getCommands: () => commands,
+  resolveCommandAlias,
 }

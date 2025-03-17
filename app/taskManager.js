@@ -12,7 +12,7 @@ class TaskManager {
    */
   constructor() {
     // Load config
-    this.configPath = path.join(__dirname, 'config.json')
+    this.configPath = path.join(__dirname, '..', 'config.json')
     this.config = require(this.configPath)
 
     this.tasks = {
