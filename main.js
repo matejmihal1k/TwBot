@@ -306,6 +306,10 @@ function handleKeyPress(key) {
  * Handle command execution
  * Uses Discord bot's command handlers directly
  */
+/**
+ * Handle command execution
+ * Uses Discord bot's command handlers directly
+ */
 function handleCommand(command) {
   logMessage(`Executing: ${command}`)
 
@@ -338,6 +342,7 @@ function handleCommand(command) {
       return logMessage('No Discord channel available for output')
     }
 
+    // CRITICAL FIX: Properly attach botUtils to the mock message
     const mockMessage = {
       author: {
         id: config.discord.allowedUserIds[0], // Use first allowed user ID
@@ -347,25 +352,19 @@ function handleCommand(command) {
       channel: channel, // This is a real Discord channel
       content: prefixedCommand,
       reply: (content) => channel.send(content),
+      client: {
+        botUtils: discordBot.botUtils, // Add botUtils directly
+      },
     }
 
     // Execute the command directly with our mock message
-    commandHandler.execute(mockMessage, args, {
-      client: discordBot.getClient(),
-      isRunning: discordBot.isRunning(),
-      config,
-      taskManager,
-      setRunning: (value) => {
-        discordBot.setRunning(value)
-      },
-    })
+    commandHandler.execute(mockMessage, args)
 
     logMessage(`Command ${resolvedCommandName} executed`)
   } catch (error) {
     logMessage(`Error: ${error.message}`)
   }
 }
-
 // ================================
 // Setup and Safety
 // ================================

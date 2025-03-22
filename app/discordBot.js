@@ -3,10 +3,10 @@
  * Provides remote command interface for the automation system
  */
 const { Client, GatewayIntentBits } = require('discord.js')
-const fs = require('fs')
 const path = require('path')
-const config = require('../config.json')
+const stateManager = require('./stateManager')
 const taskManager = require('./taskManager')
+const { handleUnknownCommand, createErrorResponse, createCommandResponse, getStatusEmoji } = require('./helper')
 
 // Create Discord client with required intents
 const client = new Client({
@@ -18,57 +18,35 @@ const client = new Client({
   ],
 })
 
-// Global state
-let isRunning = false
-const commands = new Map()
-let defaultChannel = null // Cache for default channel
+// Cache for default channel
+let defaultChannel = null
 
-/**
- * Save config to file
- */
-function saveConfig() {
-  try {
-    fs.writeFileSync(path.join(__dirname, '..', 'config.json'), JSON.stringify(config, null, 2))
-  } catch (error) {
-    console.error('Error saving config:', error)
-  }
-}
+// Create a botUtils object that exposes state management functionality
+const botUtils = {
+  get isRunning() {
+    return stateManager.isRunning()
+  },
+  taskManager,
+  setRunning: (value) => {
+    stateManager.setRunning(value)
+  },
 
-/**
- * Load commands from directory
- */
-function loadCommands() {
-  try {
-    const commandsDir = path.join(__dirname, 'commands')
-    fs.readdirSync(commandsDir)
-      .filter((file) => file.endsWith('.js'))
-      .forEach((file) => {
-        const command = require(path.join(commandsDir, file))
-        commands.set(command.name, command)
-      })
-    console.log(`Loaded ${commands.size} Discord commands`)
-  } catch (error) {
-    console.error('Error loading commands:', error)
-    process.exit(1)
-  }
-}
+  // Feature control with config persistence
+  setFeatureEnabled: (feature, value) => {
+    const result = stateManager.setTaskEnabled(feature, value)
+    if (result) {
+      taskManager.setTaskEnabled(feature, value)
+    }
+    return result
+  },
 
-/**
- * Check if user is authorized
- */
-function isAuthorized(userId) {
-  return config.discord.allowedUserIds.includes(userId)
-}
-
-/**
- * Resolve command name using aliases
- * @param {string} commandName - The command name to resolve
- * @returns {string} - The resolved command name
- */
-function resolveCommandAlias(commandName) {
-  // Get command aliases from config
-  const aliases = config.discord.commandAliases || {}
-  return aliases[commandName] || commandName
+  setBalanceInterval: (minutes) => {
+    const result = stateManager.setTaskInterval('balance', minutes)
+    if (result) {
+      taskManager.setTaskInterval('balance', minutes)
+    }
+    return result
+  },
 }
 
 /**
@@ -79,61 +57,64 @@ function handleMessage(message) {
   if (message.author.bot) return
 
   // For non-DM messages, check for command prefix
+  const config = stateManager.loadConfig()
   const isDM = message.channel.type === 'DM'
   if (!isDM && !message.content.startsWith(config.discord.commandPrefix)) return
 
   // Check authorization
-  if (!isAuthorized(message.author.id)) return
+  if (!isAuthorized(message.author.id)) {
+    console.log(`Unauthorized user ${message.author.tag} (${message.author.id}) attempted to use command`)
+    return
+  }
 
   // Parse command
   const content = isDM ? message.content : message.content.slice(config.discord.commandPrefix.length)
   const [commandName, ...args] = content.trim().split(/ +/)
 
   // Resolve command alias
-  const resolvedCommandName = resolveCommandAlias(commandName.toLowerCase())
+  const resolvedCommandName = stateManager.resolveCommandAlias(commandName.toLowerCase())
 
   // Handle paused state - only allow resume and status when paused
-  if (!isRunning && !['resume', 'status'].includes(resolvedCommandName)) {
-    return message.reply('Bot is paused. Use !resume or !r to resume or !status (!s) to check status.')
+  if (!stateManager.isRunning() && !['resume', 'status', 'help'].includes(resolvedCommandName)) {
+    const pauseErrorEmbed = createErrorResponse({
+      title: 'Bot Paused',
+      message: 'Bot is currently paused and not accepting commands.',
+      suggestion: 'Use !resume or !r to resume or !status (!s) to check status.',
+    })
+    return message.reply({ embeds: [pauseErrorEmbed] })
   }
 
   // Execute command
+  const commands = stateManager.getCommands()
   const command = commands.get(resolvedCommandName)
-  if (!command) return message.reply('Unknown command. Type !help or !h for a list of commands.')
+  if (!command) {
+    return handleUnknownCommand(message, commandName, commands)
+  }
 
   try {
-    command.execute(message, args, {
-      client,
-      isRunning,
-      config,
-      taskManager,
+    // Attach botUtils to message.client
+    message.client.botUtils = botUtils
 
-      // State control
-      setRunning: (value) => {
-        isRunning = value
-      },
-
-      // Feature control with config persistence
-      setFeatureEnabled: (feature, value) => {
-        if (!config.features[feature]) return false
-
-        config.features[feature].enabled = value
-        saveConfig()
-        taskManager.setTaskEnabled(feature, value)
-        return true
-      },
-
-      setBalanceInterval: (minutes) => {
-        config.features.balance.interval = minutes
-        saveConfig()
-        taskManager.setBalanceInterval(minutes)
-        return true
-      },
-    })
+    // Execute the command with context
+    command.execute(message, args)
   } catch (error) {
     console.error('Command error:', error)
-    message.reply('Error executing command!')
+    const errorEmbed = createErrorResponse({
+      title: 'Command Error',
+      message: 'An error occurred while executing this command.',
+      command: resolvedCommandName,
+      suggestion: 'Please try again or contact an administrator if the issue persists.',
+    })
+    message.reply({ embeds: [errorEmbed] })
   }
+}
+
+/**
+ * Check if user is authorized
+ */
+function isAuthorized(userId) {
+  const config = stateManager.loadConfig()
+  return config.discord.allowedUserIds.includes(userId)
 }
 
 /**
@@ -158,16 +139,55 @@ function getDefaultChannel() {
 }
 
 /**
+ * Send a notification to the default channel
+ * @param {string} message - The message to send
+ * @param {Object} options - Additional options
+ * @returns {Promise<boolean>} - Success or failure
+ */
+async function sendNotification(message, options = {}) {
+  const { title = 'Notification', emoji = 'success', color = '#0099ff' } = options
+  const channel = getDefaultChannel()
+
+  if (!channel) {
+    console.error('No channel available for notification')
+    return false
+  }
+
+  try {
+    const embed = createCommandResponse({
+      commandName: 'system',
+      action: emoji,
+      result: message,
+      color,
+    })
+
+    await channel.send({ embeds: [embed] })
+    return true
+  } catch (error) {
+    console.error('Error sending notification:', error)
+    return false
+  }
+}
+
+/**
  * Initialize and start the bot
  */
-function startBot() {
+async function startBot() {
   // Load commands
-  loadCommands()
+  const commandsPath = path.join(__dirname, 'commands')
+  stateManager.loadCommands(commandsPath)
 
   // Setup event handlers
   client.once('ready', () => {
     console.log(`Discord bot logged in as ${client.user.tag}`)
-    isRunning = true
+    stateManager.setRunning(true)
+
+    // Send startup notification
+    const startTime = new Date().toLocaleTimeString()
+    sendNotification(`Bot started at ${startTime}`, {
+      title: 'Bot Started',
+      emoji: 'success',
+    })
   })
 
   client.on('messageCreate', handleMessage)
@@ -175,34 +195,56 @@ function startBot() {
   // Handle connection errors
   client.on('error', (error) => {
     console.error('Discord client error:', error)
+    sendNotification(`Discord client error: ${error.message}`, {
+      title: 'Connection Error',
+      emoji: 'error',
+      color: '#ff3333',
+    })
   })
 
   client.on('disconnect', (event) => {
     console.warn('Discord bot disconnected:', event)
+
     // Try to reconnect if it was a network issue
     if (event.code !== 1000) {
-      setTimeout(() => client.login(config.discord.token), 5000)
+      sendNotification('Bot disconnected, attempting to reconnect...', {
+        title: 'Disconnected',
+        emoji: 'warning',
+        color: '#FFA500',
+      })
+
+      setTimeout(() => {
+        const config = stateManager.loadConfig()
+        client.login(config.discord.token)
+      }, 5000)
     }
   })
 
   // Start bot
-  client.login(config.discord.token).catch((err) => {
+  try {
+    const config = stateManager.loadConfig()
+    await client.login(config.discord.token)
+    console.log('Login successful')
+  } catch (err) {
     console.error('Discord login failed:', err)
     process.exit(1)
-  })
+  }
 }
 
 // Start the bot
-startBot()
+startBot().catch((err) => {
+  console.error('Fatal error starting bot:', err)
+  process.exit(1)
+})
 
 // Export interface - include everything needed by other modules
 module.exports = {
-  isRunning: () => isRunning,
-  setRunning: (value) => {
-    isRunning = value
-  },
+  isRunning: stateManager.isRunning,
+  setRunning: stateManager.setRunning,
   getClient: () => client,
   getDefaultChannel,
-  getCommands: () => commands,
-  resolveCommandAlias,
+  getCommands: stateManager.getCommands,
+  resolveCommandAlias: stateManager.resolveCommandAlias,
+  sendNotification,
+  botUtils,
 }

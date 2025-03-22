@@ -47,13 +47,15 @@ function setupTerminalInput(handleMessageFunction) {
       // Ensure command has prefix
       const prefixedCommand = command.startsWith('!') ? command : `!${command}`
 
+      console.log(`Executing: ${command}`)
+
       // Create a mock message object for Discord handler
       const mockMessage = createMockMessage(prefixedCommand)
 
       // Process the command
       handleMessageFunction(mockMessage)
     } catch (error) {
-      console.error('Error processing command:', error.message)
+      console.error('Error processing command:', error)
     }
 
     // Restore prompt
@@ -75,6 +77,11 @@ function setupTerminalInput(handleMessageFunction) {
  * @param {string} command - The command text (with prefix)
  * @returns {Object} A mock Discord message object
  */
+/**
+ * Create a mock Discord message object from terminal input
+ * @param {string} command - The command text (with prefix)
+ * @returns {Object} A mock Discord message object
+ */
 function createMockMessage(command) {
   return {
     author: {
@@ -88,6 +95,10 @@ function createMockMessage(command) {
         console.log(`\n[Bot]: ${typeof content === 'string' ? content : JSON.stringify(content)}`)
         return Promise.resolve({ content })
       },
+    },
+    // CRITICAL FIX: Make sure botUtils is correctly attached to client
+    client: {
+      botUtils: discordBot.botUtils,
     },
     content: command,
     reply: (content) => {

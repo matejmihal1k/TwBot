@@ -1,69 +1,76 @@
-const taskManager = require('../taskManager')
-const { createCommand } = require('./baseCommand')
+/**
+ * Balance Command
+ * Controls the warehouse balancer feature
+ */
+const config = require('../../config.json')
+const {
+  processCommand,
+  createStandardHandlers,
+  createCommandHelp,
+  getStatusEmoji,
+  handleInterval,
+  restartTask,
+} = require('../helper')
 
-module.exports = createCommand({
+module.exports = {
   name: 'balance',
   description: 'Controls the warehouse balancer feature',
-  extDescription:
-    'Manages the automatic warehouse balancing feature. You can enable, disable, restart the balancer, or set its interval time.',
-  usage: '!balance [on|off|restart|interval <minutes>]',
-  options: [
-    { name: 'on', description: 'Enable warehouse balancer' },
-    { name: 'off', description: 'Disable warehouse balancer' },
-    { name: 'restart', description: 'Restart warehouse balancer' },
-    { name: 'interval', description: 'Set balancer interval time (in minutes)', args: ['<minutes>'] },
-  ],
-  examples: [
-    '!balance on - Enable warehouse balancer',
-    '!balance off - Disable warehouse balancer',
-    '!balance restart - Restart warehouse balancer',
-    '!balance interval 30 - Set balancer interval to 30 minutes',
-    '!b on - Enable warehouse balancer (using command alias)',
-    '!b o - Enable warehouse balancer (using subcommand alias)',
-    '!b i 45 - Set balancer interval to 45 minutes (using subcommand alias)',
-  ],
-  helpExamples: ['!balance on', '!b off', '!b r', '!b i 30'],
+  usage: '!balance [on|off|off f|restart|restart f|interval <minutes>]',
 
-  handlers: {
-    on: (message) => {
-      taskManager.setTaskEnabled('balance', true)
-      message.reply('Warehouse balancer enabled.')
-    },
+  // Command-specific text for help
+  optionsText: `• ${getStatusEmoji('on')} \`on\` - Enable warehouse balancer
+• ${getStatusEmoji('off')} \`off\` - Disable warehouse balancer
+• ${getStatusEmoji('off')} \`off f\` - Forcefully stop warehouse balancer
+• ${getStatusEmoji('restart')} \`restart\` - Restart warehouse balancer immediately
+• ${getStatusEmoji('restart')} \`restart f\` - Forcefully restart warehouse balancer
+• ${getStatusEmoji('interval')} \`interval <minutes>\` - Set balancer interval time`,
 
-    off: (message) => {
-      taskManager.setTaskEnabled('balance', false)
-      message.reply('Warehouse balancer disabled.')
-    },
+  examplesText: `• \`!balance on\` - Enable warehouse balancer
+• \`!balance off\` - Disable warehouse balancer
+• \`!balance off f\` - Forcefully stop warehouse balancer
+• \`!balance restart\` - Restart warehouse balancer immediately
+• \`!balance interval 30\` - Set balancer interval to 30 minutes`,
 
-    restart: (message) => {
-      // Check current status
-      const taskStatus = taskManager.getTaskStatus('balance')
+  execute(message, args) {
+    return processCommand(message, args, {
+      name: 'balance',
+      description: this.description,
+      handlers: {
+        ...createStandardHandlers('balance'),
 
-      // If task doesn't exist, show error
-      if (!taskStatus) {
-        return message.reply('Balance task not found.')
-      }
+        // Custom restart handler with balance-specific messaging
+        restart: (message, args) => {
+          const forceRestart = args[1]?.toLowerCase() === 'f' || args[1]?.toLowerCase() === 'force'
+          restartTask(message, 'balance', {
+            force: forceRestart,
+            resultMessage: 'Warehouse balancer has been restarted',
+          })
+        },
 
-      // If already enabled, disable first, then enable
-      if (taskStatus.enabled) {
-        taskManager.setTaskEnabled('balance', false)
-      }
+        // Custom interval handler with balance-specific messaging
+        interval: (message, args) => {
+          handleInterval(message, 'balance', args, {
+            errorMessage: 'Please provide a valid interval in minutes. Usage: !balance interval <minutes>',
+          })
+        },
 
-      // Use setTimeout to ensure the disable has time to take effect
-      setTimeout(() => {
-        taskManager.setTaskEnabled('balance', true)
-        message.reply('Warehouse balancer restarted.')
-      }, 100)
-    },
+        // Custom help display
+        showHelp: (message, errorMessage = null) => {
+          const embed = createCommandHelp(this, errorMessage)
 
-    interval: (message, args) => {
-      if (args[1] && !isNaN(args[1])) {
-        const intervalMinutes = parseInt(args[1])
-        taskManager.setTaskInterval('balance', intervalMinutes)
-        message.reply(`Warehouse balancer interval set to ${intervalMinutes} minutes.`)
-      } else {
-        message.reply('Please provide a valid interval in minutes. Usage: !balance interval <minutes>')
-      }
-    },
+          embed.addFields({
+            name: '⚙️ Options',
+            value: this.optionsText,
+          })
+
+          embed.addFields({
+            name: '📋 Examples',
+            value: this.examplesText,
+          })
+
+          message.reply({ embeds: [embed] })
+        },
+      },
+    })
   },
-})
+}
