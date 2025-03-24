@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tribal Wars Battle Report Formatter
 // @namespace    http://tampermonkey.net/
-// @version      1.4
+// @version      1.5
 // @description  Automatically formats and saves battle reports to village notes.
 // @author       C-3P0
 // @match        */game.php?*screen=report*view=*
@@ -61,6 +61,7 @@
   const NOTE_REGEX = /<textarea[^>]*id="message"[^>]*>([\s\S]*?)<\/textarea>/
   const UNIT_CLASS_REGEX = /unit-item-(\w+)/
   const NUMBER_REGEX = /[\d.,]+/
+  const COORDS_REGEX = /\((\d+\|\d+)\)/
 
   // Unit type mappings - defined once to avoid redundancy
   const ATTACKER_UNITS = [
@@ -228,6 +229,16 @@
   }
 
   /**
+   * Extracts coordinates from a village text
+   * @param {string} villageText - The village text that contains coordinates
+   * @returns {string|null} - The coordinates or null if not found
+   */
+  function extractCoords(villageText) {
+    const match = villageText.match(COORDS_REGEX)
+    return match ? match[1] : null
+  }
+
+  /**
    * Extracts and formats all report data based on type
    * @param {string} type - The type of report ('enemy_attack', 'enemy_defense', 'ally_attack', 'ally_defense')
    * @returns {Object|null} - An object containing the formatted text and target village ID, or null if extraction failed
@@ -258,22 +269,37 @@
     }
     const attackerName = attackerNameElement.textContent.trim()
 
-    // Get village IDs
-    const attackerVillageElement = attackInfoTable.querySelector('tr:nth-child(2) td:nth-child(2) span')
-    const defenderVillageElement = defenseInfoTable.querySelector('tr:nth-child(2) td:nth-child(2) span')
+    // Get defender info
+    const defenderNameElement = defenseInfoTable.querySelector('tr:first-child th:nth-child(2) a')
+    if (!defenderNameElement) {
+      debugLog('Could not find defender name')
+      return null
+    }
+    const defenderName = defenderNameElement.textContent.trim()
+
+    // Get village IDs and coordinates
+    const attackerVillageElement = attackInfoTable.querySelector('tr:nth-child(2) td:nth-child(2)')
+    const defenderVillageElement = defenseInfoTable.querySelector('tr:nth-child(2) td:nth-child(2)')
     if (!attackerVillageElement || !defenderVillageElement) {
       debugLog('Could not find attacker or defender village')
       return null
     }
 
-    const attackerVillageId = attackerVillageElement.getAttribute('data-id')
-    const defenderVillageId = defenderVillageElement.getAttribute('data-id')
+    const attackerVillageId = attackerVillageElement.querySelector('span').getAttribute('data-id')
+    const defenderVillageId = defenderVillageElement.querySelector('span').getAttribute('data-id')
+
+    // Extract village coordinates
+    const attackerVillageText = attackerVillageElement.textContent.trim()
+    const defenderVillageText = defenderVillageElement.textContent.trim()
+
+    const attackerCoords = extractCoords(attackerVillageText)
+    const defenderCoords = extractCoords(defenderVillageText)
 
     // Select which village ID to use based on report type
     const villageId = type === 'enemy_attack' || type === 'enemy_defense' ? attackerVillageId : defenderVillageId
 
-    // Format header based on type
-    const header = formatHeader(type, reportDate, attackerName)
+    // Format header based on type and with enhanced information
+    const header = formatHeader(type, reportDate, attackerName, defenderName, attackerCoords, defenderCoords)
 
     // Start spoiler for details
     let text = header + '\n[spoiler=' + CONFIG.labels.details + ']'
@@ -342,18 +368,28 @@
   }
 
   /**
-   * Formats the report header
+   * Formats the report header with enhanced information
    * @param {string} type - The type of report
    * @param {string} date - The report date
-   * @param {string} playerName - The attacker's name
+   * @param {string} attackerName - The attacker's name
+   * @param {string} defenderName - The defender's name
+   * @param {string} attackerCoords - The coordinates of the attacker's village
+   * @param {string} defenderCoords - The coordinates of the defender's village
    * @returns {string} - The formatted header
    */
-  function formatHeader(type, date, playerName) {
+  function formatHeader(type, date, attackerName, defenderName, attackerCoords, defenderCoords) {
     const isOff = type === 'enemy_attack' || type === 'ally_attack'
     const color = isOff ? CONFIG.colors.off : CONFIG.colors.def
     const label = isOff ? CONFIG.labels.off : CONFIG.labels.def
 
-    return `[b][color=${color}]${label}[/color][/b] ${date} [player]${playerName}[/player]`
+    // Format based on report type
+    if (type === 'enemy_attack' || type === 'enemy_defense') {
+      // For enemy reports: [DEF/OFF] [time] [attacker name] -> [defender name]: [defender village coords]
+      return `[b][color=${color}]${label}[/color][/b] ${date} [player]${attackerName}[/player] -> [player]${defenderName}[/player]: [coord]${defenderCoords}[/coord]`
+    } else {
+      // For ally reports: [DEF/OFF] [time] [attacker name] [attacker village coords] -> [defender name]
+      return `[b][color=${color}]${label}[/color][/b] ${date} [player]${attackerName}[/player] [coord]${attackerCoords}[/coord] -> [player]${defenderName}[/player]`
+    }
   }
 
   /**
