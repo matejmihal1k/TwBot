@@ -2,7 +2,6 @@
  * Farm Command
  * Controls the troops farming feature
  */
-const config = require('../../config.json')
 const {
   processCommand,
   createStandardHandlers,

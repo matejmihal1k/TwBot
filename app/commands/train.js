@@ -2,7 +2,6 @@
  * Train Command
  * Controls the paladin training feature
  */
-const config = require('../../config.json')
 const {
   processCommand,
   createStandardHandlers,
@@ -16,7 +15,6 @@ module.exports = {
   name: 'train',
   description: 'Controls the paladin training feature',
   usage: '!train [on|off|off f|restart|restart f|schedule <minutes>]',
-
   // Command-specific text for help
   optionsText: `• ${getStatusEmoji('on')} \`on\` - Enable paladin training
 • ${getStatusEmoji('off')} \`off\` - Disable paladin training

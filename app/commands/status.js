@@ -3,7 +3,7 @@
  * Shows the current status of the bot and its features
  */
 const { EmbedBuilder } = require('discord.js')
-const config = require('../../config.json')
+const stateManager = require('../stateManager')
 const {
   getStatusEmoji,
   formatTimeRemaining,

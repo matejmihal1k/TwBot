@@ -2,7 +2,6 @@
  * Balance Command
  * Controls the warehouse balancer feature
  */
-const config = require('../../config.json')
 const {
   processCommand,
   createStandardHandlers,

@@ -5,7 +5,7 @@
 const { EmbedBuilder } = require('discord.js')
 const fs = require('fs')
 const path = require('path')
-const config = require('../../config.json')
+const stateManager = require('../stateManager')
 const { getStatusEmoji, processCommand } = require('../helper')
 
 module.exports = {
@@ -74,6 +74,7 @@ module.exports = {
   // Handle specific command help request
   handleSpecificCommand(message, requestedCommandOrAlias) {
     // Get command aliases from config
+    const config = stateManager.loadConfig()
     const commandAliases = config.discord.commandAliases || {}
 
     // Get commands path and files
@@ -107,6 +108,7 @@ module.exports = {
   // Show general help with list of all commands
   showGeneralHelp(message) {
     // Get command aliases from config
+    const config = stateManager.loadConfig()
     const commandAliases = config.discord.commandAliases || {}
 
     // Get commands path and files
