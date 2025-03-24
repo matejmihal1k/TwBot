@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tribal Wars Battle Report Formatter
 // @namespace    http://tampermonkey.net/
-// @version      1.5
+// @version      1.6
 // @description  Automatically formats and saves battle reports to village notes.
 // @author       C-3P0
 // @match        */game.php?*screen=report*view=*
@@ -22,19 +22,23 @@
       enemyDefense: 'i', // Key for enemy defensive villages (save to attacker village)
       allyAttack: 'o', // Key for ally reports on enemy offensive villages (save to defender village)
       allyDefense: 'p', // Key for ally reports on enemy defensive villages (save to defender village)
+      emptyAttack: 'l', // Key for empty reports (uses green color, save to defender village)
     },
 
     // Colors for report headers
     colors: {
       off: '#ff0000', // Color for offensive reports (red)
       def: '#0000ff', // Color for defensive reports (blue)
+      empty: '#00cc00', // Color for empty reports (green)
     },
 
     // Text labels used in formatted reports
     labels: {
       off: 'OFF', // Label for offensive reports
       def: 'DEF', // Label for defensive reports
+      empty: 'EMPTY', // Label for empty reports
       sent: 'Sent', // Label for units sent
+      defend: 'Defend', // Label for units defending
       survived: 'Survived', // Label for units that survived
       away: 'Away', // Label for units away from village
       wood: 'Wood', // Label for wood resource
@@ -124,6 +128,9 @@
       case CONFIG.keys.allyDefense:
         reportType = 'ally_defense'
         break
+      case CONFIG.keys.emptyAttack:
+        reportType = 'empty_attack'
+        break
       default:
         return // Not a shortcut key, exit early
     }
@@ -142,12 +149,13 @@
     guideDiv.style[CONFIG.guidePosition] = '10px'
 
     guideDiv.innerHTML = `
-            <div style="font-weight:bold;margin-bottom:5px;border-bottom:1px solid #c0c0c0;padding-bottom:3px;">Report Formatter Shortcuts</div>
-            <div style="margin-bottom:3px;"><b>${CONFIG.keys.enemyAttack.toUpperCase()}</b> - Enemy attack (${CONFIG.labels.off}) → First village</div>
-            <div style="margin-bottom:3px;"><b>${CONFIG.keys.enemyDefense.toUpperCase()}</b> - Enemy attack (${CONFIG.labels.def}) → First village</div>
-            <div style="margin-bottom:3px;"><b>${CONFIG.keys.allyAttack.toUpperCase()}</b> - Ally attack (${CONFIG.labels.off}) → Second village</div>
-            <div style="margin-bottom:3px;"><b>${CONFIG.keys.allyDefense.toUpperCase()}</b> - Ally attack (${CONFIG.labels.def}) → Second village</div>
-        `
+              <div style="font-weight:bold;margin-bottom:5px;border-bottom:1px solid #c0c0c0;padding-bottom:3px;">Report Formatter Shortcuts</div>
+              <div style="margin-bottom:3px;"><b>${CONFIG.keys.enemyAttack.toUpperCase()}</b> - Enemy attack (${CONFIG.labels.off}) → First village</div>
+              <div style="margin-bottom:3px;"><b>${CONFIG.keys.enemyDefense.toUpperCase()}</b> - Enemy attack (${CONFIG.labels.def}) → First village</div>
+              <div style="margin-bottom:3px;"><b>${CONFIG.keys.allyAttack.toUpperCase()}</b> - Ally attack (${CONFIG.labels.off}) → Second village</div>
+              <div style="margin-bottom:3px;"><b>${CONFIG.keys.allyDefense.toUpperCase()}</b> - Ally attack (${CONFIG.labels.def}) → Second village</div>
+              <div style="margin-bottom:3px;"><b>${CONFIG.keys.emptyAttack.toUpperCase()}</b> - Empty report (${CONFIG.labels.empty}) → Second village</div>
+          `
 
     // Add close button
     const closeButton = document.createElement('div')
@@ -166,7 +174,7 @@
 
   /**
    * Main function to format and save a battle report
-   * @param {string} type - The type of report ('enemy_attack', 'enemy_defense', 'ally_attack', 'ally_defense')
+   * @param {string} type - The type of report ('enemy_attack', 'enemy_defense', 'ally_attack', 'ally_defense', 'empty_attack')
    */
   function formatAndSaveReport(type) {
     try {
@@ -240,7 +248,7 @@
 
   /**
    * Extracts and formats all report data based on type
-   * @param {string} type - The type of report ('enemy_attack', 'enemy_defense', 'ally_attack', 'ally_defense')
+   * @param {string} type - The type of report ('enemy_attack', 'enemy_defense', 'ally_attack', 'ally_defense', 'empty_attack')
    * @returns {Object|null} - An object containing the formatted text and target village ID, or null if extraction failed
    */
   function getReportData(type) {
@@ -259,7 +267,7 @@
       debugLog('Could not find report date')
       return null
     }
-    const reportDate = reportDateElement.textContent.trim().split(/\s+/)[0]
+    const reportDateTime = reportDateElement.textContent.trim().split('<')[0].trim()
 
     // Get attacker info
     const attackerNameElement = attackInfoTable.querySelector('tr:first-child th:nth-child(2) a')
@@ -299,7 +307,7 @@
     const villageId = type === 'enemy_attack' || type === 'enemy_defense' ? attackerVillageId : defenderVillageId
 
     // Format header based on type and with enhanced information
-    const header = formatHeader(type, reportDate, attackerName, defenderName, attackerCoords, defenderCoords)
+    const header = formatHeader(type, reportDateTime, attackerName, defenderName, attackerCoords, defenderCoords)
 
     // Start spoiler for details
     let text = header + '\n[spoiler=' + CONFIG.labels.details + ']'
@@ -307,12 +315,15 @@
     // Format unit info based on report type
     if (type === 'enemy_attack' || type === 'enemy_defense') {
       // For enemy reports, only include attacker unit info
-      text += formatUnitInfo('attack_info_att_units', ATTACKER_UNITS)
+      text += formatUnitInfo('attack_info_att_units', ATTACKER_UNITS, false)
+    } else if (type === 'empty_attack') {
+      // For empty reports, just include a placeholder
+      text += '\nEmpty report'
     } else {
       // For ally reports, include both attacker and defender info plus upgrades
-      text += formatUnitInfo('attack_info_att_units', ATTACKER_UNITS)
+      text += formatUnitInfo('attack_info_att_units', ATTACKER_UNITS, false)
       text += '\n' // Simple line break
-      text += formatUnitInfo('attack_info_def_units', DEFENDER_UNITS)
+      text += formatUnitInfo('attack_info_def_units', DEFENDER_UNITS, true)
 
       // Add defender upgrades if available (only for ally reports)
       const upgradesText = formatDefenderUpgrades()
@@ -370,25 +381,35 @@
   /**
    * Formats the report header with enhanced information
    * @param {string} type - The type of report
-   * @param {string} date - The report date
+   * @param {string} dateTime - The report date and time
    * @param {string} attackerName - The attacker's name
    * @param {string} defenderName - The defender's name
    * @param {string} attackerCoords - The coordinates of the attacker's village
    * @param {string} defenderCoords - The coordinates of the defender's village
    * @returns {string} - The formatted header
    */
-  function formatHeader(type, date, attackerName, defenderName, attackerCoords, defenderCoords) {
-    const isOff = type === 'enemy_attack' || type === 'ally_attack'
-    const color = isOff ? CONFIG.colors.off : CONFIG.colors.def
-    const label = isOff ? CONFIG.labels.off : CONFIG.labels.def
+  function formatHeader(type, dateTime, attackerName, defenderName, attackerCoords, defenderCoords) {
+    let color, label
+
+    // Set color and label based on report type
+    if (type === 'enemy_attack' || type === 'ally_attack') {
+      color = CONFIG.colors.off
+      label = CONFIG.labels.off
+    } else if (type === 'enemy_defense' || type === 'ally_defense') {
+      color = CONFIG.colors.def
+      label = CONFIG.labels.def
+    } else if (type === 'empty_attack') {
+      color = CONFIG.colors.empty
+      label = CONFIG.labels.empty
+    }
 
     // Format based on report type
     if (type === 'enemy_attack' || type === 'enemy_defense') {
       // For enemy reports: [DEF/OFF] [time] [attacker name] -> [defender name]: [defender village coords]
-      return `[b][color=${color}]${label}[/color][/b] ${date} [player]${attackerName}[/player] -> [player]${defenderName}[/player]: [coord]${defenderCoords}[/coord]`
+      return `[b][color=${color}]${label}[/color][/b] ${dateTime} [player]${attackerName}[/player] -> [player]${defenderName}[/player]: [coord]${defenderCoords}[/coord]`
     } else {
-      // For ally reports: [DEF/OFF] [time] [attacker name] [attacker village coords] -> [defender name]
-      return `[b][color=${color}]${label}[/color][/b] ${date} [player]${attackerName}[/player] [coord]${attackerCoords}[/coord] -> [player]${defenderName}[/player]`
+      // For ally reports: [DEF/OFF/EMPTY] [time] [attacker name] [attacker village coords] -> [defender name]
+      return `[b][color=${color}]${label}[/color][/b] ${dateTime} [player]${attackerName}[/player] [coord]${attackerCoords}[/coord] -> [player]${defenderName}[/player]`
     }
   }
 
@@ -396,9 +417,10 @@
    * Formats unit information for a given table
    * @param {string} tableId - The ID of the unit table
    * @param {string[]} unitTypes - Array of unit types to process
+   * @param {boolean} isDefender - Whether this is defender unit info
    * @returns {string} - The formatted unit information
    */
-  function formatUnitInfo(tableId, unitTypes) {
+  function formatUnitInfo(tableId, unitTypes, isDefender) {
     const unitTable = document.getElementById(tableId)
     if (!unitTable) return '\nNo unit information available'
 
@@ -430,8 +452,11 @@
     // Early exit if no units found
     if (unitData.length === 0) return '\nNo units in report'
 
+    // Use different label for sent based on whether this is defender info
+    const sentLabel = isDefender ? CONFIG.labels.defend : CONFIG.labels.sent
+
     // Build strings more efficiently with map
-    const sentText = CONFIG.labels.sent + ': ' + unitData.map((u) => `[unit]${u.type}[/unit]${u.sent}`).join(' ')
+    const sentText = sentLabel + ': ' + unitData.map((u) => `[unit]${u.type}[/unit]${u.sent}`).join(' ')
 
     const survivedText =
       '\n' + CONFIG.labels.survived + ': ' + unitData.map((u) => `[unit]${u.type}[/unit]${u.survived}`).join(' ')
